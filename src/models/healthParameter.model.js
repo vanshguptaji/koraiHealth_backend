@@ -19,7 +19,7 @@ const healthParameterSchema = new Schema(
     referenceRange: {
       min: { type: Number },
       max: { type: Number },
-      text: { type: String } // For ranges like "Negative", "Positive"
+      text: { type: String } 
     },
     status: {
       type: String,

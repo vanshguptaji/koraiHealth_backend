@@ -5,7 +5,10 @@ import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { LabReport } from "../models/labReport.model.js";
 import { User } from "../models/user.model.js";
 import { HealthParameter } from "../models/healthParameter.model.js";
-import { extractTextFromFile } from "../utils/ocrProcessor.js";
+import { 
+  extractTextFromFileSimple as extractTextFromFile,
+  detectHealthContent 
+} from "../utils/ocrProcessor.js";
 import { parseHealthParameters, generateAIRecommendations } from "../utils/healthAnalyzer.js";
 
 const uploadLabReport = asyncHandler(async (req, res) => {
@@ -27,7 +30,7 @@ const uploadLabReport = asyncHandler(async (req, res) => {
   let isTextExtracted = false;
   let healthParameters = [];
   let recommendations = null;
-  
+
   try {
     const supportedTypes = [
       'application/pdf',
@@ -42,13 +45,25 @@ const uploadLabReport = asyncHandler(async (req, res) => {
 
     if (supportedTypes.includes(req.file.mimetype)) {
       extractedText = await extractTextFromFile(fileLocalPath, req.file.mimetype);
-      isTextExtracted = true;
-      console.log("Text extraction successful for:", req.file.originalname);
+      
+      // Check if extraction was actually successful
+      if (extractedText && !extractedText.includes('failed') && !extractedText.includes('error') && extractedText.length > 20) {
+        const healthContent = detectHealthContent(extractedText);
+        isTextExtracted = true;
+        console.log("Text extraction successful for:", req.file.originalname);
+        console.log("Health content detected:", healthContent);
+        console.log("Extracted text preview:", extractedText.substring(0, 200));
+      } else {
+        isTextExtracted = false;
+        console.log("Text extraction returned error or no content:", extractedText?.substring(0, 100));
+      }
     } else {
       console.log("File type not supported for text extraction:", req.file.mimetype);
+      extractedText = `File type ${req.file.mimetype} does not support text extraction.`;
     }
   } catch (error) {
     console.error("OCR extraction failed:", error.message);
+    extractedText = `Text extraction failed: ${error.message}`;
     isTextExtracted = false;
   }
 
@@ -64,19 +79,28 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     rawText: extractedText,
   });
 
-  // Parse health parameters if text was extracted
-  if (isTextExtracted && extractedText) {
+  // Only parse health parameters if we actually extracted text successfully
+  if (isTextExtracted && extractedText && extractedText.length > 20) {
     try {
-      healthParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
-      
-      // Save health parameters to database
-      if (healthParameters.length > 0) {
-        await HealthParameter.insertMany(healthParameters);
+      // Check if parseHealthParameters function exists
+      if (typeof parseHealthParameters === 'function') {
+        healthParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
         
-        // Generate AI recommendations
-        recommendations = generateAIRecommendations(healthParameters, extractedText);
-        
-        console.log(`Extracted ${healthParameters.length} health parameters`);
+        // Save health parameters to database
+        if (healthParameters && healthParameters.length > 0) {
+          await HealthParameter.insertMany(healthParameters);
+          
+          // Generate AI recommendations if function exists
+          if (typeof generateAIRecommendations === 'function') {
+            recommendations = generateAIRecommendations(healthParameters, extractedText);
+          }
+          
+          console.log(`Extracted ${healthParameters.length} health parameters`);
+        } else {
+          console.log("No health parameters found in extracted text");
+        }
+      } else {
+        console.log("parseHealthParameters function not available");
       }
     } catch (error) {
       console.error("Health parameter parsing failed:", error);
@@ -97,10 +121,10 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     .json(new ApiResponse(201, {
       ...labReport.toObject(),
       textExtractionSupported: isTextExtracted,
-      extractedText: extractedText || null,
-      healthParameters: healthParameters,
+      extractedText: isTextExtracted ? extractedText : null,
+      healthParameters: healthParameters || [],
       recommendations: recommendations,
-      parametersFound: healthParameters.length
+      parametersFound: (healthParameters && healthParameters.length) || 0
     }, `File uploaded successfully${isTextExtracted ? ' with text extraction' : ''}`));
 });
 

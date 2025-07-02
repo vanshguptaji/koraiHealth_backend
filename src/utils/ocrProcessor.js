@@ -1,84 +1,86 @@
 import Tesseract from 'tesseract.js';
 import fs from 'fs';
-import path from 'path';
 
-export const extractTextFromFile = async (filePath, mimeType) => {
+export const extractTextFromFileSimple = async (filePath, mimeType) => {
   try {
     console.log(`Starting text extraction for file type: ${mimeType}`);
+    console.log(`File path: ${filePath}`);
     
+    // Verify file exists
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    // Get file stats
+    const stats = fs.statSync(filePath);
+    console.log(`File size: ${stats.size} bytes`);
+
     if (mimeType === 'application/pdf') {
       return await extractTextFromPDF(filePath);
     } else if (mimeType.startsWith('image/')) {
       return await extractTextFromImage(filePath);
     } else {
-      throw new Error(`Unsupported file type for text extraction: ${mimeType}`);
+      return `File type ${mimeType} does not support text extraction.`;
     }
   } catch (error) {
     console.error('Text extraction error:', error);
-    throw error;
+    return `Text extraction failed: ${error.message}`;
   }
 };
+
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 
 const extractTextFromPDF = async (filePath) => {
   try {
-    // First try to extract text directly from PDF
-    const pdf = await import('pdf-parse');
-    const dataBuffer = fs.readFileSync(filePath);
-    const pdfData = await pdf.default(dataBuffer);
-    
-    if (pdfData.text && pdfData.text.trim().length > 50) {
-      console.log('PDF has selectable text');
-      return cleanExtractedText(pdfData.text);
-    } else {
-      console.log('PDF appears to be image-based, using OCR');
-      return await extractTextFromPDFImages(filePath);
-    }
-  } catch (error) {
-    console.error('PDF text extraction error:', error);
-    // Fallback to OCR
-    return await extractTextFromPDFImages(filePath);
-  }
-};
+    // Alternative using pdf2json
+    const PDFParser = require('pdf2json');
 
-const extractTextFromPDFImages = async (filePath) => {
-  try {
-    const { fromPath } = await import('pdf2pic');
-    
-    const convert = fromPath(filePath, {
-      density: 300,
-      saveFilename: "page",
-      savePath: "./public/temp/",
-      format: "png",
-      width: 2000,
-      height: 2000
-    });
-
-    // Convert first 3 pages maximum to avoid long processing times
-    const pageLimit = 3;
-    let extractedText = '';
-
-    for (let i = 1; i <= pageLimit; i++) {
-      try {
-        const result = await convert(i);
-        if (result && result.path) {
-          const pageText = await extractTextFromImage(result.path);
-          extractedText += `\n--- Page ${i} ---\n${pageText}\n`;
+    return new Promise((resolve, reject) => {
+      const pdfParser = new PDFParser();
+      
+      pdfParser.on('pdfParser_dataError', errData => {
+        console.error('PDF parsing error:', errData.parserError);
+        reject(new Error('Failed to parse PDF'));
+      });
+      
+      pdfParser.on('pdfParser_dataReady', pdfData => {
+        try {
+          let text = '';
           
-          // Clean up temporary image
-          if (fs.existsSync(result.path)) {
-            fs.unlinkSync(result.path);
+          if (pdfData.Pages) {
+            pdfData.Pages.forEach(page => {
+              if (page.Texts) {
+                page.Texts.forEach(textObj => {
+                  if (textObj.R) {
+                    textObj.R.forEach(textRun => {
+                      if (textRun.T) {
+                        text += decodeURIComponent(textRun.T) + ' ';
+                      }
+                    });
+                  }
+                });
+              }
+            });
           }
+          
+          if (text.trim().length > 5) {
+            const cleanText = cleanExtractedText(text);
+            console.log(`Successfully extracted ${cleanText.length} characters from PDF`);
+            resolve(cleanText);
+          } else {
+            resolve("This PDF appears to be image-based or contains no extractable text.");
+          }
+        } catch (error) {
+          reject(error);
         }
-      } catch (pageError) {
-        console.error(`Error processing page ${i}:`, pageError);
-        break;
-      }
-    }
-
-    return cleanExtractedText(extractedText);
+      });
+      
+      pdfParser.loadPDF(filePath);
+    });
   } catch (error) {
-    console.error('PDF to image conversion error:', error);
-    throw new Error('Failed to extract text from PDF');
+    console.error('PDF extraction error:', error);
+    return `PDF processing failed: ${error.message}`;
   }
 };
 
@@ -94,38 +96,62 @@ const extractTextFromImage = async (imagePath) => {
       }
     });
     
-    return cleanExtractedText(text);
+    console.log(`OCR completed. Raw text length: ${text.length}`);
+    
+    if (text && text.trim().length > 0) {
+      const cleanText = cleanExtractedText(text);
+      console.log(`Successfully extracted ${cleanText.length} characters from image`);
+      return cleanText;
+    } else {
+      return "No text could be detected in this image.";
+    }
   } catch (error) {
     console.error('Image OCR error:', error);
-    throw new Error('Failed to extract text from image');
+    return `Image text extraction failed: ${error.message}`;
   }
 };
 
 // Helper function to clean up extracted text
 export const cleanExtractedText = (text) => {
+  if (!text) return "";
+  
   return text
     .replace(/\s+/g, ' ')
-    .replace(/\n+/g, '\n')
-    .replace(/[^\w\s\n.,;:()[\]{}-]/g, '')
+    .replace(/\n\s*\n/g, '\n')
+    .replace(/[^\w\s\n.,;:()\[\]{}\-\/=<>]/g, '')
     .trim();
 };
 
-// Helper function to detect if file might contain health data
+// Helper function to detect if text contains health/lab data
 export const detectHealthContent = (text) => {
   const healthKeywords = [
     'glucose', 'cholesterol', 'hemoglobin', 'blood', 'urine', 'test', 'result',
     'normal', 'abnormal', 'mg/dl', 'mmol/l', 'g/dl', 'lab', 'laboratory',
-    'patient', 'doctor', 'hospital', 'clinic', 'medical', 'report'
+    'patient', 'doctor', 'hospital', 'clinic', 'medical', 'report', 'serum',
+    'plasma', 'analysis', 'reference', 'range', 'high', 'low', 'within', 'limits'
   ];
+  
+  if (!text || text.length === 0) {
+    return {
+      isHealthRelated: false,
+      confidence: 0,
+      foundKeywords: [],
+      textLength: 0
+    };
+  }
   
   const textLower = text.toLowerCase();
   const foundKeywords = healthKeywords.filter(keyword => 
-    textLower.includes(keyword)
+    textLower.includes(keyword.toLowerCase())
   );
   
   return {
     isHealthRelated: foundKeywords.length >= 2,
-    confidence: (foundKeywords.length / healthKeywords.length) * 100,
-    foundKeywords
+    confidence: Math.min(100, (foundKeywords.length / healthKeywords.length) * 100),
+    foundKeywords,
+    textLength: text.length
   };
 };
+
+// Simple fallback version
+export const extractTextFromFile = extractTextFromFileSimple;
