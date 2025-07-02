@@ -83,7 +83,10 @@ const uploadLabReport = asyncHandler(async (req, res) => {
   if (isTextExtracted && extractedText && extractedText.length > 20) {
     try {
       console.log("Attempting to parse health parameters...");
-      healthParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
+      let healthParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
+      
+      // Validate and clean the parameters
+      healthParameters = validateHealthParameters(healthParameters);
       
       // Save health parameters to database
       if (healthParameters && healthParameters.length > 0) {
@@ -94,9 +97,14 @@ const uploadLabReport = asyncHandler(async (req, res) => {
         
         console.log(`Successfully extracted ${healthParameters.length} health parameters`);
         console.log("Categories found:", [...new Set(healthParameters.map(p => p.category))]);
+        
+        // Log the extracted parameters for debugging
+        healthParameters.forEach(param => {
+          console.log(`- ${param.name}: ${param.value} ${param.unit} (${param.status})`);
+        });
       } else {
         console.log("No health parameters found in extracted text");
-        console.log("Text sample:", extractedText.substring(0, 300));
+        console.log("Text sample for debugging:", extractedText.substring(0, 500));
       }
     } catch (error) {
       console.error("Health parameter parsing failed:", error);

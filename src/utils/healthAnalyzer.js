@@ -58,87 +58,193 @@ export const parseHealthParameters = (text, reportId, userId) => {
   const lines = text.split('\n');
   
   console.log(`Parsing health parameters from ${lines.length} lines of text`);
+  console.log("Sample lines:", lines.slice(0, 10));
   
-  // Enhanced regex patterns for health parameters
+  // More precise and ordered regex patterns for health parameters
   const patterns = [
-    // Pattern: Parameter: Value Unit
-    /(\w+(?:\s+\w+)*)\s*:?\s*(\d+\.?\d*)\s*(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)/gi,
-    // Pattern: Parameter Value Unit (Range)
-    /(\w+(?:\s+\w+)*)\s+(\d+\.?\d*)\s*(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)\s*\([^)]*\)/gi,
-    // Pattern: Parameter - Value Unit
-    /(\w+(?:\s+\w+)*)\s*-\s*(\d+\.?\d*)\s*(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)/gi,
-    // Pattern: Parameter Value (without explicit unit, common in some formats)
-    /(\w+(?:\s+\w+)*)\s*:?\s*(\d+\.?\d*)\s*(?:Normal|High|Low|Abnormal)?/gi
+    // Pattern 1: Parameter: Value Unit (most specific first)
+    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]*:[\s]*(\d+\.?\d*)[\s]+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)[\s]*(?:\(.*\))?/gi,
+    
+    // Pattern 2: Parameter Value Unit (Reference Range)
+    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]+(\d+\.?\d*)[\s]+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)[\s]*\([^)]*\)/gi,
+    
+    // Pattern 3: Parameter - Value Unit
+    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]*-[\s]*(\d+\.?\d*)[\s]+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)/gi,
+    
+    // Pattern 4: Parameter Value Unit (simple format)
+    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]+(\d+\.?\d*)[\s]+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)[\s]*$/gi,
+    
+    // Pattern 5: Common lab format with tabs or multiple spaces
+    /([a-zA-Z][a-zA-Z\s]+?)\s{2,}(\d+\.?\d*)\s+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)/gi,
+    
+    // Pattern 6: Parameter followed by value (no unit specified - will use default from definitions)
+    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]*:[\s]*(\d+\.?\d*)[\s]*(?:Normal|High|Low|Abnormal)?[\s]*$/gi
   ];
 
+  // Process each line
   lines.forEach((line, lineIndex) => {
-    patterns.forEach((pattern, patternIndex) => {
-      const matches = [...line.matchAll(pattern)];
-      matches.forEach(match => {
+    // Skip empty lines or lines that are too short
+    if (!line.trim() || line.trim().length < 3) return;
+    
+    // Skip header lines (common patterns to ignore)
+    const skipPatterns = [
+      /^[\s]*test[\s]*result[\s]*reference/i,
+      /^[\s]*parameter[\s]*value[\s]*range/i,
+      /^[\s]*investigation[\s]*result/i,
+      /^[\s]*normal[\s]*range/i,
+      /^[\s]*reference[\s]*range/i,
+      /^[\s]*-+[\s]*$/,
+      /^[\s]*={2,}[\s]*$/,
+      /^[\s]*page[\s]*\d+/i,
+      /^[\s]*report[\s]*date/i,
+      /^[\s]*patient[\s]*name/i
+    ];
+    
+    const shouldSkip = skipPatterns.some(pattern => pattern.test(line));
+    if (shouldSkip) {
+      console.log(`Skipping header line: ${line.trim()}`);
+      return;
+    }
+
+    let matchFound = false;
+    
+    // Try patterns in order of specificity
+    for (let patternIndex = 0; patternIndex < patterns.length; patternIndex++) {
+      const pattern = patterns[patternIndex];
+      pattern.lastIndex = 0; // Reset regex
+      
+      const match = pattern.exec(line);
+      if (match && !matchFound) {
         const name = match[1].trim().toLowerCase();
         const value = parseFloat(match[2]);
         const unit = match[3] ? match[3].toLowerCase() : '';
         
-        console.log(`Found potential parameter: ${name} = ${value} ${unit} (Line: ${lineIndex + 1})`);
+        // Additional validation
+        if (name.length < 2 || name.length > 50) {
+          console.log(`Skipping invalid parameter name: "${name}"`);
+          continue;
+        }
+        
+        // Check for valid numeric value
+        if (isNaN(value) || value < 0 || value > 100000) {
+          console.log(`Skipping invalid value: ${value} for parameter: ${name}`);
+          continue;
+        }
+        
+        console.log(`Pattern ${patternIndex + 1} matched: "${name}" = ${value} ${unit} (Line: ${lineIndex + 1})`);
         
         // Check if this parameter is in our definitions
         const paramDef = findParameterDefinition(name);
-        if (paramDef && !isNaN(value)) {
-          const parameter = {
-            name: name,
-            value: value,
-            unit: unit || paramDef.unit,
-            referenceRange: {
-              min: paramDef.min,
-              max: paramDef.max
-            },
-            status: determineStatus(value, paramDef),
-            category: paramDef.category,
-            reportId: reportId,
-            userId: userId,
-            extractedFrom: line.trim()
-          };
+        if (paramDef) {
+          // Check for duplicates
+          const isDuplicate = parameters.some(p => 
+            p.name === name && Math.abs(p.value - value) < 0.01
+          );
           
-          parameters.push(parameter);
-          console.log(`Added parameter: ${name} (${parameter.status})`);
+          if (!isDuplicate) {
+            const parameter = {
+              name: name,
+              value: value,
+              unit: unit || paramDef.unit,
+              referenceRange: {
+                min: paramDef.min,
+                max: paramDef.max
+              },
+              status: determineStatus(value, paramDef),
+              category: paramDef.category,
+              reportId: reportId,
+              userId: userId,
+              extractedFrom: line.trim()
+            };
+            
+            parameters.push(parameter);
+            console.log(`✓ Added parameter: ${name} = ${value} ${parameter.unit} (${parameter.status})`);
+            matchFound = true;
+            break; // Stop trying other patterns for this line
+          } else {
+            console.log(`Duplicate parameter found, skipping: ${name}`);
+          }
         } else {
-          console.log(`Parameter not recognized or invalid value: ${name}`);
+          console.log(`Parameter not recognized: "${name}"`);
         }
-      });
-    });
+      }
+    }
+    
+    if (!matchFound && line.trim().length > 5) {
+      console.log(`No pattern matched for line: "${line.trim()}"`);
+    }
+  });
+
+  // Sort parameters by category and name for consistent ordering
+  parameters.sort((a, b) => {
+    if (a.category !== b.category) {
+      return a.category.localeCompare(b.category);
+    }
+    return a.name.localeCompare(b.name);
   });
 
   console.log(`Total parameters extracted: ${parameters.length}`);
+  if (parameters.length > 0) {
+    console.log("Extracted parameters:", parameters.map(p => `${p.name}: ${p.value} ${p.unit}`));
+  }
+  
   return parameters;
 };
 
+// Enhanced parameter definition finder with better matching
 const findParameterDefinition = (name) => {
   const cleanName = name.toLowerCase().trim();
   
-  // Direct match
+  // Remove common prefixes/suffixes that might interfere
+  const cleanedName = cleanName
+    .replace(/^(serum|blood|plasma|total|free)\s+/i, '')
+    .replace(/\s+(level|count|test|result)$/i, '')
+    .trim();
+  
+  // Direct match (try both original and cleaned name)
   if (PARAMETER_DEFINITIONS[cleanName]) {
     return PARAMETER_DEFINITIONS[cleanName];
   }
   
-  // Partial match for similar parameters
-  for (const [key, value] of Object.entries(PARAMETER_DEFINITIONS)) {
-    if (cleanName.includes(key) || key.includes(cleanName)) {
-      return value;
-    }
+  if (PARAMETER_DEFINITIONS[cleanedName]) {
+    return PARAMETER_DEFINITIONS[cleanedName];
   }
   
-  // Try with common abbreviations
+  // Try common abbreviations and variations
   const abbreviations = {
     'hb': 'hemoglobin',
+    'hgb': 'hemoglobin',
     'hct': 'hematocrit',
     'sgpt': 'alt',
     'sgot': 'ast',
     'tc': 'total cholesterol',
-    'tg': 'triglycerides'
+    'tg': 'triglycerides',
+    'tri': 'triglycerides',
+    'chol': 'cholesterol',
+    'glu': 'glucose',
+    'cr': 'creatinine',
+    'bil': 'bilirubin',
+    'wbc count': 'wbc',
+    'rbc count': 'rbc',
+    'platelet count': 'platelets',
+    'plt': 'platelets'
   };
   
   if (abbreviations[cleanName] && PARAMETER_DEFINITIONS[abbreviations[cleanName]]) {
     return PARAMETER_DEFINITIONS[abbreviations[cleanName]];
+  }
+  
+  if (abbreviations[cleanedName] && PARAMETER_DEFINITIONS[abbreviations[cleanedName]]) {
+    return PARAMETER_DEFINITIONS[abbreviations[cleanedName]];
+  }
+  
+  // Partial match for similar parameters (more restrictive)
+  for (const [key, value] of Object.entries(PARAMETER_DEFINITIONS)) {
+    // Only match if the clean name contains the key or vice versa, and they're reasonably similar
+    if ((cleanName.includes(key) && cleanName.length - key.length <= 3) ||
+        (key.includes(cleanName) && key.length - cleanName.length <= 3)) {
+      return value;
+    }
   }
   
   return null;
@@ -157,6 +263,27 @@ const determineStatus = (value, paramDef) => {
   if (value > paramDef.max) return 'high';
   
   return 'normal';
+};
+
+// Add a helper function to validate extracted data
+export const validateHealthParameters = (parameters) => {
+  const validatedParams = [];
+  const seen = new Set();
+  
+  parameters.forEach(param => {
+    // Create a unique key for deduplication
+    const key = `${param.name}_${param.value}_${param.unit}`;
+    
+    if (!seen.has(key)) {
+      // Additional validation checks
+      if (param.value > 0 && param.name.length > 1 && param.category) {
+        validatedParams.push(param);
+        seen.add(key);
+      }
+    }
+  });
+  
+  return validatedParams;
 };
 
 export const generateAIRecommendations = (parameters, extractedText) => {
