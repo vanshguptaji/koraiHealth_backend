@@ -38,10 +38,8 @@ router.route("/:reportId").delete(deleteLabReport);
 // Get health parameters for a report
 router.route("/:reportId/parameters").get(getHealthParameters);
 
-// Get health trends
-router.route("/health/trends").get(getUserHealthTrends);
-
-// Get health dashboard
-router.route("/health/dashboard").get(getHealthDashboard);
+// FIXED ROUTES - Match frontend expectations
+router.route("/dashboard").get(getHealthDashboard);
+router.route("/trends").get(getUserHealthTrends);
 
 export default router;
