@@ -10,36 +10,23 @@ import {
   getUserHealthTrends,
   getHealthDashboard
 } from "../controllers/labReport.controller.js";
-import { verifyJWT } from "../middlewares/auth.middleware.js";
 import { upload } from "../middlewares/multer.middleware.js";
+import { verifyJWT } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
-router.use(verifyJWT); // Apply verifyJWT middleware to all routes in this file
+router.use(verifyJWT);
 
-// Upload lab report
-router.route("/upload").post(upload.any(), uploadLabReport);
-
-// Get user's lab reports
+// File operations
+router.route("/upload").post(upload.single("file"), uploadLabReport);
 router.route("/").get(getUserLabReports);
-
-// Get text from specific file
-router.route("/:reportId/text").get(getFileText);
-
-// Retry text extraction
-router.route("/:reportId/retry").post(retryTextExtraction);
-
-// Get all file types summary
 router.route("/types").get(getAllFileTypes);
-
-// Delete lab report
+router.route("/:reportId/text").get(getFileText);
+router.route("/:reportId/retry-extraction").post(retryTextExtraction);
 router.route("/:reportId").delete(deleteLabReport);
 
-// Get health parameters for a report
 router.route("/:reportId/parameters").get(getHealthParameters);
-
-// FIXED ROUTES - Match frontend expectations
-router.route("/dashboard").get(getHealthDashboard);
-router.route("/trends").get(getUserHealthTrends);
+router.route("/health/trends").get(getUserHealthTrends);
+router.route("/health/dashboard").get(getHealthDashboard);
 
 export default router;
