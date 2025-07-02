@@ -25,9 +25,24 @@ app.use(express.static("public"))
 app.use(cookieParser())
 
 app.use("/api/v1/users", userRouter);
-
 app.use("/api/v1/lab-reports", labReportRouter);
 
-// http://localhost:8000/api/v1/users/register
+// Global error handler
+app.use((error, req, res, next) => {
+    console.error('Global error handler:', error);
+    res.status(error.statusCode || 500).json({
+        success: false,
+        message: error.message || "Internal server error",
+        ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    });
+});
+
+// 404 handler
+app.use('*', (req, res) => {
+    res.status(404).json({
+        success: false,
+        message: `Route ${req.originalUrl} not found`
+    });
+});
 
 export { app };

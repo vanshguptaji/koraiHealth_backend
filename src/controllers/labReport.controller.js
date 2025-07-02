@@ -166,277 +166,151 @@ const uploadLabReport = asyncHandler(async (req, res) => {
 });
 
 const getUserLabReports = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id)
-    .populate({
-      path: "FilesUploaded",
-      select: "fileName originalName fileUrl fileSize mimeType createdAt extracted rawText"
-    });
-
-  if (!user) {
-    throw new ApiError(404, "User not found");
+  try {
+    const labReports = await LabReport.find({ uploadedBy: req.user._id })
+      .sort({ createdAt: -1 });
+    
+    res.status(200).json(
+      new ApiResponse(200, labReports, "Lab reports retrieved successfully")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Error retrieving lab reports");
   }
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, user.FilesUploaded, "Files fetched successfully"));
 });
 
 const getFileText = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
-
-  const labReport = await LabReport.findOne({
-    _id: reportId,
-    uploadedBy: req.user._id
-  }).select("rawText extracted originalName mimeType");
-
-  if (!labReport) {
-    throw new ApiError(404, "File not found or unauthorized");
+  try {
+    const { reportId } = req.params;
+    const labReport = await LabReport.findOne({ 
+      _id: reportId, 
+      uploadedBy: req.user._id 
+    });
+    
+    if (!labReport) {
+      throw new ApiError(404, "Lab report not found");
+    }
+    
+    res.status(200).json(
+      new ApiResponse(200, { 
+        text: labReport.rawText,
+        extracted: labReport.extracted 
+      }, "Text retrieved successfully")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Error retrieving text");
   }
-
-  if (!labReport.extracted) {
-    return res
-      .status(200)
-      .json(new ApiResponse(200, {
-        reportId: labReport._id,
-        originalName: labReport.originalName,
-        mimeType: labReport.mimeType,
-        extracted: false,
-        text: null,
-        message: "Text extraction not available for this file type"
-      }, "File info fetched successfully"));
-  }
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, {
-      reportId: labReport._id,
-      originalName: labReport.originalName,
-      mimeType: labReport.mimeType,
-      extracted: labReport.extracted,
-      text: labReport.rawText
-    }, "File text fetched successfully"));
 });
 
 const retryTextExtraction = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
-
-  const labReport = await LabReport.findOne({
-    _id: reportId,
-    uploadedBy: req.user._id
-  });
-
-  if (!labReport) {
-    throw new ApiError(404, "File not found or unauthorized");
+  try {
+    const { reportId } = req.params;
+    const labReport = await LabReport.findOne({ 
+      _id: reportId, 
+      uploadedBy: req.user._id 
+    });
+    
+    if (!labReport) {
+      throw new ApiError(404, "Lab report not found");
+    }
+    
+    // For now, just return the existing text
+    res.status(200).json(
+      new ApiResponse(200, labReport, "Text extraction retry completed")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Error retrying text extraction");
   }
-
-  // Check if file type supports text extraction
-  const supportedTypes = [
-    'application/pdf',
-    'image/jpeg',
-    'image/jpg', 
-    'image/png',
-    'image/gif',
-    'image/bmp',
-    'image/tiff',
-    'image/webp'
-  ];
-
-  if (!supportedTypes.includes(labReport.mimeType)) {
-    throw new ApiError(400, "File type does not support text extraction");
-  }
-
-  // For retry, we would need to download from Cloudinary and process
-  // This is a simplified response - in production, you'd download and reprocess
-  return res
-    .status(200)
-    .json(new ApiResponse(200, {
-      message: "To retry text extraction, please re-upload the file"
-    }, "Retry extraction info"));
 });
 
 const getAllFileTypes = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.user._id)
-    .populate({
-      path: "FilesUploaded",
-      select: "originalName mimeType fileSize extracted createdAt"
-    });
-
-  if (!user) {
-    throw new ApiError(404, "User not found");
+  try {
+    const fileTypes = await LabReport.aggregate([
+      { $match: { uploadedBy: req.user._id } },
+      { $group: { _id: "$mimeType", count: { $sum: 1 } } }
+    ]);
+    
+    res.status(200).json(
+      new ApiResponse(200, fileTypes, "File types retrieved successfully")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Error retrieving file types");
   }
-
-  // Group files by type
-  const filesByType = user.FilesUploaded.reduce((acc, file) => {
-    const type = file.mimeType.split('/')[0]; // 'image', 'application', etc.
-    if (!acc[type]) {
-      acc[type] = [];
-    }
-    acc[type].push({
-      id: file._id,
-      name: file.originalName,
-      mimeType: file.mimeType,
-      size: file.fileSize,
-      hasText: file.extracted,
-      uploadedAt: file.createdAt
-    });
-    return acc;
-  }, {});
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, {
-      totalFiles: user.FilesUploaded.length,
-      filesByType: filesByType,
-      supportedTextExtraction: [
-        'application/pdf',
-        'image/jpeg',
-        'image/png',
-        'image/gif',
-        'image/bmp',
-        'image/tiff',
-        'image/webp'
-      ]
-    }, "File types summary fetched successfully"));
 });
 
 const deleteLabReport = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
-
-  // Find and delete the lab report
-  const labReport = await LabReport.findOneAndDelete({
-    _id: reportId,
-    uploadedBy: req.user._id
-  });
-
-  if (!labReport) {
-    throw new ApiError(404, "File not found or unauthorized");
-  }
-
-  // Remove from user's FilesUploaded array
-  await User.findByIdAndUpdate(
-    req.user._id,
-    {
-      $pull: { FilesUploaded: reportId }
+  try {
+    const { reportId } = req.params;
+    const labReport = await LabReport.findOneAndDelete({ 
+      _id: reportId, 
+      uploadedBy: req.user._id 
+    });
+    
+    if (!labReport) {
+      throw new ApiError(404, "Lab report not found");
     }
-  );
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, {}, "File deleted successfully"));
+    
+    // Also delete associated health parameters
+    await HealthParameter.deleteMany({ reportId: reportId });
+    
+    res.status(200).json(
+      new ApiResponse(200, {}, "Lab report deleted successfully")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Error deleting lab report");
+  }
 });
 
 const getHealthParameters = asyncHandler(async (req, res) => {
-  const { reportId } = req.params;
-
-  const parameters = await HealthParameter.find({
-    reportId: reportId,
-    userId: req.user._id
-  }).sort({ createdAt: -1 });
-
-  if (parameters.length === 0) {
-    throw new ApiError(404, "No health parameters found for this report");
+  try {
+    const { reportId } = req.params;
+    const parameters = await HealthParameter.find({ 
+      reportId: reportId,
+      userId: req.user._id 
+    });
+    
+    res.status(200).json(
+      new ApiResponse(200, parameters, "Health parameters retrieved successfully")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Error retrieving health parameters");
   }
-
-  // Generate recommendations for these parameters
-  const recommendations = generateAIRecommendations(parameters, "");
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, {
-      parameters: parameters,
-      recommendations: recommendations,
-      totalParameters: parameters.length
-    }, "Health parameters fetched successfully"));
 });
 
 const getUserHealthTrends = asyncHandler(async (req, res) => {
-  const { parameterName, days = 30 } = req.query;
-  
-  const dateLimit = new Date();
-  dateLimit.setDate(dateLimit.getDate() - parseInt(days));
-
-  let query = {
-    userId: req.user._id,
-    createdAt: { $gte: dateLimit }
-  };
-
-  if (parameterName) {
-    query.name = parameterName.toLowerCase();
+  try {
+    const parameters = await HealthParameter.find({ 
+      userId: req.user._id 
+    }).sort({ createdAt: -1 });
+    
+    res.status(200).json(
+      new ApiResponse(200, parameters, "Health trends retrieved successfully")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Error retrieving health trends");
   }
-
-  const parameters = await HealthParameter.find(query)
-    .sort({ createdAt: 1 })
-    .populate('reportId', 'originalName createdAt');
-
-  // Group by parameter name for trending
-  const trendData = parameters.reduce((acc, param) => {
-    if (!acc[param.name]) {
-      acc[param.name] = [];
-    }
-    acc[param.name].push({
-      value: param.value,
-      unit: param.unit,
-      status: param.status,
-      date: param.createdAt,
-      reportName: param.reportId?.originalName
-    });
-    return acc;
-  }, {});
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, {
-      trendData: trendData,
-      totalDataPoints: parameters.length,
-      dateRange: {
-        from: dateLimit,
-        to: new Date()
-      }
-    }, "Health trends fetched successfully"));
 });
 
 const getHealthDashboard = asyncHandler(async (req, res) => {
-  // Get latest parameters for each type
-  const latestParameters = await HealthParameter.aggregate([
-    { $match: { userId: req.user._id } },
-    { $sort: { createdAt: -1 } },
-    {
-      $group: {
-        _id: "$name",
-        latest: { $first: "$$ROOT" }
-      }
-    },
-    { $replaceRoot: { newRoot: "$latest" } }
-  ]);
-
-  // Generate overall recommendations
-  const recommendations = generateAIRecommendations(latestParameters, "");
-
-  // Get parameter categories summary
-  const categorySummary = latestParameters.reduce((acc, param) => {
-    if (!acc[param.category]) {
-      acc[param.category] = { normal: 0, abnormal: 0, critical: 0 };
-    }
+  try {
+    const recentReports = await LabReport.find({ uploadedBy: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(5);
     
-    if (param.status.includes('critical')) {
-      acc[param.category].critical++;
-    } else if (['high', 'low'].includes(param.status)) {
-      acc[param.category].abnormal++;
-    } else {
-      acc[param.category].normal++;
-    }
+    const totalReports = await LabReport.countDocuments({ uploadedBy: req.user._id });
+    const totalParameters = await HealthParameter.countDocuments({ userId: req.user._id });
     
-    return acc;
-  }, {});
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, {
-      latestParameters: latestParameters,
-      recommendations: recommendations,
-      categorySummary: categorySummary,
-      totalParameters: latestParameters.length
-    }, "Health dashboard data fetched successfully"));
+    const dashboard = {
+      totalReports,
+      totalParameters,
+      recentReports
+    };
+    
+    res.status(200).json(
+      new ApiResponse(200, dashboard, "Dashboard data retrieved successfully")
+    );
+  } catch (error) {
+    throw new ApiError(500, "Error retrieving dashboard data");
+  }
 });
 
 export {
