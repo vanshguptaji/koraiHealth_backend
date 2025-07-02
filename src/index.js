@@ -2,9 +2,11 @@
 import dotenv from "dotenv";
 import connectDB from "./db/index.js";
 import { app } from "./app.js";
+import { validateEnv } from './utils/validateEnv.js';
 
 dotenv.config({path: './env'})
 
+validateEnv();
 
 connectDB()
 .then(() => {

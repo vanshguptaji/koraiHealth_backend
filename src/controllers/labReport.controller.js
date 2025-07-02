@@ -12,124 +12,123 @@ import {
 import { parseHealthParameters, generateAIRecommendations } from "../utils/healthAnalyzer.js";
 
 const uploadLabReport = asyncHandler(async (req, res) => {
-  if (!req.file) {
-    throw new ApiError(400, "File is required");
-  }
-
-  const fileLocalPath = req.file.path;
-  
-  // Upload to cloudinary
-  const uploadResult = await uploadOnCloudinary(fileLocalPath);
-  
-  if (!uploadResult) {
-    throw new ApiError(500, "Failed to upload file to cloudinary");
-  }
-
-  // Try to extract text for supported file types
-  let extractedText = "";
-  let isTextExtracted = false;
-  let healthParameters = [];
-  let recommendations = null;
-
   try {
-    const supportedTypes = [
-      'application/pdf',
-      'image/jpeg',
-      'image/jpg', 
-      'image/png',
-      'image/gif',
-      'image/bmp',
-      'image/tiff',
-      'image/webp'
-    ];
+    console.log("Upload request received");
+    console.log("File:", req.file);
+    console.log("User:", req.user);
 
-    if (supportedTypes.includes(req.file.mimetype)) {
-      extractedText = await extractTextFromFile(fileLocalPath, req.file.mimetype);
-      
-      // Check if extraction was actually successful
-      if (extractedText && !extractedText.includes('failed') && !extractedText.includes('error') && extractedText.length > 20) {
-        const healthContent = detectHealthContent(extractedText);
-        isTextExtracted = true;
-        console.log("Text extraction successful for:", req.file.originalname);
-        console.log("Health content detected:", healthContent);
-        console.log("Extracted text preview:", extractedText.substring(0, 200));
-      } else {
-        isTextExtracted = false;
-        console.log("Text extraction returned error or no content:", extractedText?.substring(0, 100));
-      }
-    } else {
-      console.log("File type not supported for text extraction:", req.file.mimetype);
-      extractedText = `File type ${req.file.mimetype} does not support text extraction.`;
+    if (!req.file) {
+      throw new ApiError(400, "File is required");
     }
-  } catch (error) {
-    console.error("OCR extraction failed:", error.message);
-    extractedText = `Text extraction failed: ${error.message}`;
-    isTextExtracted = false;
-  }
 
-  // Create lab report document
-  const labReport = await LabReport.create({
-    fileName: uploadResult.public_id,
-    originalName: req.file.originalname,
-    fileUrl: uploadResult.secure_url,
-    fileSize: req.file.size,
-    mimeType: req.file.mimetype,
-    uploadedBy: req.user._id,
-    extracted: isTextExtracted,
-    rawText: extractedText,
-  });
+    const fileLocalPath = req.file.path;
+    console.log("File local path:", fileLocalPath);
+    
+    // Upload to cloudinary
+    console.log("Uploading to Cloudinary...");
+    const uploadResult = await uploadOnCloudinary(fileLocalPath);
+    
+    if (!uploadResult) {
+      throw new ApiError(400, "Error while uploading file to cloudinary");
+    }
 
-  // Only parse health parameters if we actually extracted text successfully
-  if (isTextExtracted && extractedText && extractedText.length > 20) {
+    console.log("Cloudinary upload successful:", uploadResult.secure_url);
+
+    // Extract text from file
+    console.log("Starting text extraction...");
+    let extractedText = "";
+    let isTextExtracted = false;
+    let healthContent = null;
+    
     try {
-      console.log("Attempting to parse health parameters...");
-      let healthParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
+      extractedText = await extractTextFromFile(fileLocalPath, req.file.mimetype);
+      console.log("Text extraction completed. Length:", extractedText.length);
       
-      // Validate and clean the parameters
-      healthParameters = validateHealthParameters(healthParameters);
-      
-      // Save health parameters to database
-      if (healthParameters && healthParameters.length > 0) {
-        await HealthParameter.insertMany(healthParameters);
-        
-        // Generate AI recommendations
-        recommendations = generateAIRecommendations(healthParameters, extractedText);
-        
-        console.log(`Successfully extracted ${healthParameters.length} health parameters`);
-        console.log("Categories found:", [...new Set(healthParameters.map(p => p.category))]);
-        
-        // Log the extracted parameters for debugging
-        healthParameters.forEach(param => {
-          console.log(`- ${param.name}: ${param.value} ${param.unit} (${param.status})`);
-        });
-      } else {
-        console.log("No health parameters found in extracted text");
-        console.log("Text sample for debugging:", extractedText.substring(0, 500));
+      if (extractedText && extractedText.length > 10) {
+        isTextExtracted = true;
+        healthContent = detectHealthContent(extractedText);
+        console.log("Health content detected:", healthContent);
       }
-    } catch (error) {
-      console.error("Health parameter parsing failed:", error);
+    } catch (textError) {
+      console.error("Text extraction failed:", textError);
+      extractedText = `Text extraction failed: ${textError.message}`;
+      isTextExtracted = false;
     }
+
+    // Create lab report
+    console.log("Creating lab report in database...");
+    const labReport = await LabReport.create({
+      fileName: uploadResult.public_id,
+      originalName: req.file.originalname,
+      fileUrl: uploadResult.secure_url,
+      fileSize: req.file.size,
+      mimeType: req.file.mimetype,
+      uploadedBy: req.user._id,
+      extracted: isTextExtracted,
+      rawText: extractedText,
+    });
+
+    console.log("Lab report created:", labReport._id);
+
+    let healthParameters = [];
+    let recommendations = null;
+
+    // Only parse health parameters if we actually extracted text successfully
+    if (isTextExtracted && extractedText && extractedText.length > 20) {
+      try {
+        console.log("Attempting to parse health parameters...");
+        healthParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
+        
+        // Validate and clean the parameters
+        healthParameters = validateHealthParameters(healthParameters);
+        
+        // Save health parameters to database
+        if (healthParameters && healthParameters.length > 0) {
+          console.log("Saving health parameters to database...");
+          await HealthParameter.insertMany(healthParameters);
+          
+          // Generate AI recommendations
+          console.log("Generating AI recommendations...");
+          recommendations = generateAIRecommendations(healthParameters, extractedText);
+          
+          console.log(`Successfully extracted ${healthParameters.length} health parameters`);
+          console.log("Categories found:", [...new Set(healthParameters.map(p => p.category))]);
+          
+          // Log the extracted parameters for debugging
+          healthParameters.forEach(param => {
+            console.log(`- ${param.name}: ${param.value} ${param.unit} (${param.status})`);
+          });
+        } else {
+          console.log("No health parameters found in extracted text");
+          console.log("Text sample for debugging:", extractedText.substring(0, 500));
+        }
+      } catch (error) {
+        console.error("Health parameter parsing failed:", error);
+      }
+    }
+
+    console.log("Sending response...");
+    res.status(201).json(
+      new ApiResponse(201, {
+        labReport,
+        healthParameters,
+        recommendations,
+        healthContent,
+        extractedText: isTextExtracted ? extractedText.substring(0, 1000) : extractedText
+      }, "Lab report uploaded and processed successfully")
+    );
+
+  } catch (error) {
+    console.error("Upload lab report error:", error);
+    console.error("Error stack:", error.stack);
+    
+    // Send detailed error for debugging
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Internal server error",
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
-
-  // Add lab report to user's FilesUploaded array
-  await User.findByIdAndUpdate(
-    req.user._id,
-    {
-      $push: { FilesUploaded: labReport._id }
-    },
-    { new: true }
-  );
-
-  return res
-    .status(201)
-    .json(new ApiResponse(201, {
-      ...labReport.toObject(),
-      textExtractionSupported: isTextExtracted,
-      extractedText: isTextExtracted ? extractedText : null,
-      healthParameters: healthParameters || [],
-      recommendations: recommendations,
-      parametersFound: (healthParameters && healthParameters.length) || 0
-    }, `File uploaded successfully${isTextExtracted ? ' with text extraction' : ''}`));
 });
 
 const getUserLabReports = asyncHandler(async (req, res) => {
