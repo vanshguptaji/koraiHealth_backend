@@ -3,11 +3,13 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import userRouter from "./routes/user.routes.js";
 import labReportRouter from "./routes/labReport.routes.js";
+import dotenv from "dotenv";
+dotenv.config();
 
 const app = express()
 
 app.use(cors({
-    origin: process.env.CORS_ORIGIN.split(','),
+    origin: process.env.CORS_ORIGIN ,
     credentials: true,
     optionsSuccessStatus: 200,
 }))
