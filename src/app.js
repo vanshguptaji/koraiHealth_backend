@@ -8,10 +8,15 @@ dotenv.config();
 
 const app = express()
 
+// Convert CORS_ORIGIN string to array
+const corsOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()) : [];
+
 app.use(cors({
-    origin: process.env.CORS_ORIGIN ,
+    origin: corsOrigins,
     credentials: true,
     optionsSuccessStatus: 200,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
 }))
 
 app.use(express.json({limit: "16kb"}))
