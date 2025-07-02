@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import userRouter from "./routes/user.routes.js";
+import labReportRouter from "./routes/labReport.routes.js";
 
 const app = express()
 
@@ -15,13 +17,9 @@ app.use(express.urlencoded({extended: true, limit: "16kb"}))
 app.use(express.static("public"))
 app.use(cookieParser())
 
-
-//routes are imported here
-import userRouter from "./routes/user.routes.js"
-
-
-//routes declaration
 app.use("/api/v1/users", userRouter);
+
+app.use("/api/v1/lab-reports", labReportRouter);
 
 // http://localhost:8000/api/v1/users/register
 
