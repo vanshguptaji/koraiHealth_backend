@@ -7,7 +7,7 @@ import labReportRouter from "./routes/labReport.routes.js";
 const app = express()
 
 app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: process.env.CORS_ORIGIN.split(','),
     credentials: true,
     optionsSuccessStatus: 200,
 }))
