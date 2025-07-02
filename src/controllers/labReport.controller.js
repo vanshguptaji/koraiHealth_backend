@@ -18,15 +18,18 @@ import {
 const uploadLabReport = asyncHandler(async (req, res) => {
   try {
     console.log("Upload request received");
-    console.log("File:", req.file);
     console.log("Files:", req.files);
+    console.log("File:", req.file);
     console.log("User:", req.user);
 
-    if (!req.file) {
+    // Handle both req.file and req.files
+    const uploadedFile = req.file || (req.files && req.files[0]);
+
+    if (!uploadedFile) {
       throw new ApiError(400, "File is required");
     }
 
-    const fileLocalPath = req.file.path;
+    const fileLocalPath = uploadedFile.path;
     console.log("File local path:", fileLocalPath);
     
     // Check if file exists before processing
@@ -53,7 +56,7 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     let healthContent = null;
     
     try {
-      extractedText = await extractTextFromFile(fileLocalPath, req.file.mimetype);
+      extractedText = await extractTextFromFile(fileLocalPath, uploadedFile.mimetype);
       console.log("Text extraction completed. Length:", extractedText.length);
       
       if (extractedText && extractedText.length > 10) {
@@ -71,10 +74,10 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     console.log("Creating lab report in database...");
     const labReport = await LabReport.create({
       fileName: uploadResult.public_id,
-      originalName: req.file.originalname,
+      originalName: uploadedFile.originalname,
       fileUrl: uploadResult.secure_url,
-      fileSize: req.file.size,
-      mimeType: req.file.mimetype,
+      fileSize: uploadedFile.size,
+      mimeType: uploadedFile.mimetype,
       uploadedBy: req.user._id,
       extracted: isTextExtracted,
       rawText: extractedText,
@@ -104,15 +107,8 @@ const uploadLabReport = asyncHandler(async (req, res) => {
           recommendations = generateAIRecommendations(healthParameters, extractedText);
           
           console.log(`Successfully extracted ${healthParameters.length} health parameters`);
-          console.log("Categories found:", [...new Set(healthParameters.map(p => p.category))]);
-          
-          // Log the extracted parameters for debugging
-          healthParameters.forEach(param => {
-            console.log(`- ${param.name}: ${param.value} ${param.unit} (${param.status})`);
-          });
         } else {
           console.log("No health parameters found in extracted text");
-          console.log("Text sample for debugging:", extractedText.substring(0, 500));
         }
       } catch (error) {
         console.error("Health parameter parsing failed:", error);
@@ -142,26 +138,21 @@ const uploadLabReport = asyncHandler(async (req, res) => {
 
   } catch (error) {
     console.error("Upload lab report error:", error);
-    console.error("Error stack:", error.stack);
     
     // Clean up temporary file if it exists
-    if (req.file && req.file.path) {
+    const uploadedFile = req.file || (req.files && req.files[0]);
+    if (uploadedFile && uploadedFile.path) {
       try {
         const fs = await import('fs');
-        if (fs.existsSync(req.file.path)) {
-          fs.unlinkSync(req.file.path);
+        if (fs.existsSync(uploadedFile.path)) {
+          fs.unlinkSync(uploadedFile.path);
         }
       } catch (cleanupError) {
         console.error("Error cleaning up file after error:", cleanupError);
       }
     }
     
-    // Send detailed error for debugging
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: error.message || "Internal server error",
-      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    throw error;
   }
 });
 
