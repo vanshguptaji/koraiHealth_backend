@@ -82,25 +82,21 @@ const uploadLabReport = asyncHandler(async (req, res) => {
   // Only parse health parameters if we actually extracted text successfully
   if (isTextExtracted && extractedText && extractedText.length > 20) {
     try {
-      // Check if parseHealthParameters function exists
-      if (typeof parseHealthParameters === 'function') {
-        healthParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
+      console.log("Attempting to parse health parameters...");
+      healthParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
+      
+      // Save health parameters to database
+      if (healthParameters && healthParameters.length > 0) {
+        await HealthParameter.insertMany(healthParameters);
         
-        // Save health parameters to database
-        if (healthParameters && healthParameters.length > 0) {
-          await HealthParameter.insertMany(healthParameters);
-          
-          // Generate AI recommendations if function exists
-          if (typeof generateAIRecommendations === 'function') {
-            recommendations = generateAIRecommendations(healthParameters, extractedText);
-          }
-          
-          console.log(`Extracted ${healthParameters.length} health parameters`);
-        } else {
-          console.log("No health parameters found in extracted text");
-        }
+        // Generate AI recommendations
+        recommendations = generateAIRecommendations(healthParameters, extractedText);
+        
+        console.log(`Successfully extracted ${healthParameters.length} health parameters`);
+        console.log("Categories found:", [...new Set(healthParameters.map(p => p.category))]);
       } else {
-        console.log("parseHealthParameters function not available");
+        console.log("No health parameters found in extracted text");
+        console.log("Text sample:", extractedText.substring(0, 300));
       }
     } catch (error) {
       console.error("Health parameter parsing failed:", error);
