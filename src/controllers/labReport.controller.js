@@ -9,12 +9,17 @@ import {
   extractTextFromFileSimple as extractTextFromFile,
   detectHealthContent 
 } from "../utils/ocrProcessor.js";
-import { parseHealthParameters, generateAIRecommendations } from "../utils/healthAnalyzer.js";
+import { 
+  parseHealthParameters, 
+  generateAIRecommendations,
+  validateHealthParameters 
+} from "../utils/healthAnalyzer.js";
 
 const uploadLabReport = asyncHandler(async (req, res) => {
   try {
     console.log("Upload request received");
     console.log("File:", req.file);
+    console.log("Files:", req.files);
     console.log("User:", req.user);
 
     if (!req.file) {
@@ -23,6 +28,13 @@ const uploadLabReport = asyncHandler(async (req, res) => {
 
     const fileLocalPath = req.file.path;
     console.log("File local path:", fileLocalPath);
+    
+    // Check if file exists before processing
+    const fs = await import('fs');
+    if (!fs.existsSync(fileLocalPath)) {
+      console.error("File not found at path:", fileLocalPath);
+      throw new ApiError(400, "Uploaded file not found");
+    }
     
     // Upload to cloudinary
     console.log("Uploading to Cloudinary...");
@@ -107,6 +119,16 @@ const uploadLabReport = asyncHandler(async (req, res) => {
       }
     }
 
+    // Clean up temporary file
+    try {
+      if (fs.existsSync(fileLocalPath)) {
+        fs.unlinkSync(fileLocalPath);
+        console.log("Temporary file cleaned up");
+      }
+    } catch (cleanupError) {
+      console.error("Error cleaning up temporary file:", cleanupError);
+    }
+
     console.log("Sending response...");
     res.status(201).json(
       new ApiResponse(201, {
@@ -121,6 +143,18 @@ const uploadLabReport = asyncHandler(async (req, res) => {
   } catch (error) {
     console.error("Upload lab report error:", error);
     console.error("Error stack:", error.stack);
+    
+    // Clean up temporary file if it exists
+    if (req.file && req.file.path) {
+      try {
+        const fs = await import('fs');
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      } catch (cleanupError) {
+        console.error("Error cleaning up file after error:", cleanupError);
+      }
+    }
     
     // Send detailed error for debugging
     res.status(error.statusCode || 500).json({

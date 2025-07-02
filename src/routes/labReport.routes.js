@@ -10,23 +10,38 @@ import {
   getUserHealthTrends,
   getHealthDashboard
 } from "../controllers/labReport.controller.js";
-import { upload } from "../middlewares/multer.middleware.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
+import { upload } from "../middlewares/multer.middleware.js";
 
 const router = Router();
 
-router.use(verifyJWT);
+router.use(verifyJWT); // Apply verifyJWT middleware to all routes in this file
 
-// File operations
-router.route("/upload").post(upload.single("file"), uploadLabReport);
+// Upload lab report
+router.route("/upload").post(upload.single("labReport"), uploadLabReport);
+
+// Get user's lab reports
 router.route("/").get(getUserLabReports);
-router.route("/types").get(getAllFileTypes);
+
+// Get text from specific file
 router.route("/:reportId/text").get(getFileText);
-router.route("/:reportId/retry-extraction").post(retryTextExtraction);
+
+// Retry text extraction
+router.route("/:reportId/retry").post(retryTextExtraction);
+
+// Get all file types summary
+router.route("/types").get(getAllFileTypes);
+
+// Delete lab report
 router.route("/:reportId").delete(deleteLabReport);
 
+// Get health parameters for a report
 router.route("/:reportId/parameters").get(getHealthParameters);
-router.route("/health/trends").get(getUserHealthTrends);
-router.route("/health/dashboard").get(getHealthDashboard);
+
+// Get health trends
+router.route("/trends").get(getUserHealthTrends);
+
+// Get health dashboard
+router.route("/dashboard").get(getHealthDashboard);
 
 export default router;
