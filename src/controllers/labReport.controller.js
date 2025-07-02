@@ -5,9 +5,8 @@ import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { LabReport } from "../models/labReport.model.js";
 import { User } from "../models/user.model.js";
 import { extractTextFromFile } from "../utils/ocrProcessor.js";
-
 const uploadLabReport = asyncHandler(async (req, res) => {
-  // Check if file is uploaded
+
   if (!req.file) {
     throw new ApiError(400, "File is required");
   }
