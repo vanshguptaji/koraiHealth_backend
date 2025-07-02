@@ -4,9 +4,11 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { LabReport } from "../models/labReport.model.js";
 import { User } from "../models/user.model.js";
+import { HealthParameter } from "../models/healthParameter.model.js";
 import { extractTextFromFile } from "../utils/ocrProcessor.js";
-const uploadLabReport = asyncHandler(async (req, res) => {
+import { parseHealthParameters, generateAIRecommendations } from "../utils/healthAnalyzer.js";
 
+const uploadLabReport = asyncHandler(async (req, res) => {
   if (!req.file) {
     throw new ApiError(400, "File is required");
   }
@@ -23,9 +25,10 @@ const uploadLabReport = asyncHandler(async (req, res) => {
   // Try to extract text for supported file types
   let extractedText = "";
   let isTextExtracted = false;
+  let healthParameters = [];
+  let recommendations = null;
   
   try {
-    // Check if file type supports text extraction
     const supportedTypes = [
       'application/pdf',
       'image/jpeg',
@@ -46,7 +49,6 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     }
   } catch (error) {
     console.error("OCR extraction failed:", error.message);
-    // Continue without extracted text if OCR fails
     isTextExtracted = false;
   }
 
@@ -62,6 +64,25 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     rawText: extractedText,
   });
 
+  // Parse health parameters if text was extracted
+  if (isTextExtracted && extractedText) {
+    try {
+      healthParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
+      
+      // Save health parameters to database
+      if (healthParameters.length > 0) {
+        await HealthParameter.insertMany(healthParameters);
+        
+        // Generate AI recommendations
+        recommendations = generateAIRecommendations(healthParameters, extractedText);
+        
+        console.log(`Extracted ${healthParameters.length} health parameters`);
+      }
+    } catch (error) {
+      console.error("Health parameter parsing failed:", error);
+    }
+  }
+
   // Add lab report to user's FilesUploaded array
   await User.findByIdAndUpdate(
     req.user._id,
@@ -76,7 +97,10 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     .json(new ApiResponse(201, {
       ...labReport.toObject(),
       textExtractionSupported: isTextExtracted,
-      extractedText: extractedText || null
+      extractedText: extractedText || null,
+      healthParameters: healthParameters,
+      recommendations: recommendations,
+      parametersFound: healthParameters.length
     }, `File uploaded successfully${isTextExtracted ? ' with text extraction' : ''}`));
 });
 
@@ -240,11 +264,128 @@ const deleteLabReport = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, {}, "File deleted successfully"));
 });
 
+const getHealthParameters = asyncHandler(async (req, res) => {
+  const { reportId } = req.params;
+
+  const parameters = await HealthParameter.find({
+    reportId: reportId,
+    userId: req.user._id
+  }).sort({ createdAt: -1 });
+
+  if (parameters.length === 0) {
+    throw new ApiError(404, "No health parameters found for this report");
+  }
+
+  // Generate recommendations for these parameters
+  const recommendations = generateAIRecommendations(parameters, "");
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {
+      parameters: parameters,
+      recommendations: recommendations,
+      totalParameters: parameters.length
+    }, "Health parameters fetched successfully"));
+});
+
+const getUserHealthTrends = asyncHandler(async (req, res) => {
+  const { parameterName, days = 30 } = req.query;
+  
+  const dateLimit = new Date();
+  dateLimit.setDate(dateLimit.getDate() - parseInt(days));
+
+  let query = {
+    userId: req.user._id,
+    createdAt: { $gte: dateLimit }
+  };
+
+  if (parameterName) {
+    query.name = parameterName.toLowerCase();
+  }
+
+  const parameters = await HealthParameter.find(query)
+    .sort({ createdAt: 1 })
+    .populate('reportId', 'originalName createdAt');
+
+  // Group by parameter name for trending
+  const trendData = parameters.reduce((acc, param) => {
+    if (!acc[param.name]) {
+      acc[param.name] = [];
+    }
+    acc[param.name].push({
+      value: param.value,
+      unit: param.unit,
+      status: param.status,
+      date: param.createdAt,
+      reportName: param.reportId?.originalName
+    });
+    return acc;
+  }, {});
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {
+      trendData: trendData,
+      totalDataPoints: parameters.length,
+      dateRange: {
+        from: dateLimit,
+        to: new Date()
+      }
+    }, "Health trends fetched successfully"));
+});
+
+const getHealthDashboard = asyncHandler(async (req, res) => {
+  // Get latest parameters for each type
+  const latestParameters = await HealthParameter.aggregate([
+    { $match: { userId: req.user._id } },
+    { $sort: { createdAt: -1 } },
+    {
+      $group: {
+        _id: "$name",
+        latest: { $first: "$$ROOT" }
+      }
+    },
+    { $replaceRoot: { newRoot: "$latest" } }
+  ]);
+
+  // Generate overall recommendations
+  const recommendations = generateAIRecommendations(latestParameters, "");
+
+  // Get parameter categories summary
+  const categorySummary = latestParameters.reduce((acc, param) => {
+    if (!acc[param.category]) {
+      acc[param.category] = { normal: 0, abnormal: 0, critical: 0 };
+    }
+    
+    if (param.status.includes('critical')) {
+      acc[param.category].critical++;
+    } else if (['high', 'low'].includes(param.status)) {
+      acc[param.category].abnormal++;
+    } else {
+      acc[param.category].normal++;
+    }
+    
+    return acc;
+  }, {});
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {
+      latestParameters: latestParameters,
+      recommendations: recommendations,
+      categorySummary: categorySummary,
+      totalParameters: latestParameters.length
+    }, "Health dashboard data fetched successfully"));
+});
+
 export {
   uploadLabReport,
   getUserLabReports,
   getFileText,
   retryTextExtraction,
   getAllFileTypes,
-  deleteLabReport
+  deleteLabReport,
+  getHealthParameters,
+  getUserHealthTrends,
+  getHealthDashboard
 };
