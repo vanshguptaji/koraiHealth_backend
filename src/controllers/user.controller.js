@@ -37,9 +37,6 @@ const registerUser = asyncHandler(async (req, res) => {
   const { fullName, email, username, password } = req.body;
   console.log("email :", email);
 
-  // if(fullName === "") {
-  //     throw new ApiError(400, "Fullname is required")
-  // }
   if (
     [fullName, email, username, password].some((field) => field?.trim() === "")
   ) {
@@ -54,22 +51,23 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(409, "User with email or username already exists");
   }
 
-  console.log("req.files.avatar :", req.files.avatar);
+  console.log("req.files:", req.files);
 
-  const avatarLocalPath = req.files?.avatar[0]?.path;
-  const coverImageLocalPath = req.files?.coverImage[0]?.path;
-  console.log("req.files :", req.files);
-  console.log("req.files.avatar[0].path :", req.files.avatar[0].path);
-  if (!avatarLocalPath) {
-    throw new ApiError(400, "Avatar file is required");
+  // Make avatar and cover image optional
+  const avatarLocalPath = req.files?.avatar?.[0]?.path;
+  const coverImageLocalPath = req.files?.coverImage?.[0]?.path;
+
+  // Upload to cloudinary only if files are provided
+  let avatar = null;
+  let coverImage = null;
+
+  if (avatarLocalPath) {
+    avatar = await uploadOnCloudinary(avatarLocalPath);
+    console.log("avatar :", avatar);
   }
 
-  const avatar = await uploadOnCloudinary(avatarLocalPath);
-  const coverImage = await uploadOnCloudinary(coverImageLocalPath);
-  console.log("avatar :", avatar);
-
-  if (!avatar) {
-    throw new ApiError(400, "Failed to upload avatar");
+  if (coverImageLocalPath) {
+    coverImage = await uploadOnCloudinary(coverImageLocalPath);
   }
 
   const user = await User.create({
@@ -77,7 +75,7 @@ const registerUser = asyncHandler(async (req, res) => {
     email,
     username: username.toLowerCase(),
     password,
-    avatar: avatar.url,
+    avatar: avatar?.url || null,
     coverImage: coverImage?.url || null,
   });
 
@@ -357,7 +355,6 @@ const updateCoverImage = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, user, "Cover Image updated successfully"));
 });
-
 
 export {
   registerUser,

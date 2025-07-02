@@ -26,8 +26,7 @@ const userSchema = new Schema(
       index: true, //to enable indexing for faster search
     },
     avatar: {
-      type: String, //cloudinary url
-      required: true,
+      type: String, 
     },
     coverImage: {
       type: String,
