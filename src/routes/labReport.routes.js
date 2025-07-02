@@ -18,7 +18,7 @@ const router = Router();
 router.use(verifyJWT); // Apply verifyJWT middleware to all routes in this file
 
 // Upload lab report
-router.route("/upload").post(upload.single("labReport"), uploadLabReport);
+router.route("/upload").post(upload.any(), uploadLabReport);
 
 // Get user's lab reports
 router.route("/").get(getUserLabReports);
@@ -39,9 +39,9 @@ router.route("/:reportId").delete(deleteLabReport);
 router.route("/:reportId/parameters").get(getHealthParameters);
 
 // Get health trends
-router.route("/trends").get(getUserHealthTrends);
+router.route("/health/trends").get(getUserHealthTrends);
 
 // Get health dashboard
-router.route("/dashboard").get(getHealthDashboard);
+router.route("/health/dashboard").get(getHealthDashboard);
 
 export default router;

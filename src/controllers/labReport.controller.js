@@ -204,7 +204,6 @@ const retryTextExtraction = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Lab report not found");
     }
     
-    // For now, just return the existing text
     res.status(200).json(
       new ApiResponse(200, labReport, "Text extraction retry completed")
     );
@@ -269,8 +268,13 @@ const getHealthParameters = asyncHandler(async (req, res) => {
 
 const getUserHealthTrends = asyncHandler(async (req, res) => {
   try {
+    const { days = 30 } = req.query;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - parseInt(days));
+    
     const parameters = await HealthParameter.find({ 
-      userId: req.user._id 
+      userId: req.user._id,
+      createdAt: { $gte: startDate }
     }).sort({ createdAt: -1 });
     
     res.status(200).json(
@@ -290,10 +294,15 @@ const getHealthDashboard = asyncHandler(async (req, res) => {
     const totalReports = await LabReport.countDocuments({ uploadedBy: req.user._id });
     const totalParameters = await HealthParameter.countDocuments({ userId: req.user._id });
     
+    const recentParameters = await HealthParameter.find({ userId: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(10);
+    
     const dashboard = {
       totalReports,
       totalParameters,
-      recentReports
+      recentReports,
+      recentParameters
     };
     
     res.status(200).json(
@@ -304,6 +313,7 @@ const getHealthDashboard = asyncHandler(async (req, res) => {
   }
 });
 
+// Make sure to export ALL functions
 export {
   uploadLabReport,
   getUserLabReports,
