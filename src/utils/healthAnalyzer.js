@@ -60,135 +60,138 @@ export const parseHealthParameters = (text, reportId, userId) => {
   console.log(`Parsing health parameters from ${lines.length} lines of text`);
   console.log("Sample lines:", lines.slice(0, 10));
   
-  // More precise and ordered regex patterns for health parameters
+  // Enhanced patterns specifically for your PDF format
   const patterns = [
-    // Pattern 1: Parameter: Value Unit (most specific first)
-    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]*:[\s]*(\d+\.?\d*)[\s]+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)[\s]*(?:\(.*\))?/gi,
+    // Pattern for your specific format: "Test Name Value Unit Range"
+    /([A-Za-z\s()]+?)\s+(\d+\.?\d*)\s+(IU\/mL|pg\/mL|ng\/dL|mg\/dL|%|mmHg)\s+([<>]?\s*[\d.-]+(?:\s*-\s*[\d.]+)?)/gi,
     
-    // Pattern 2: Parameter Value Unit (Reference Range)
-    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]+(\d+\.?\d*)[\s]+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)[\s]*\([^)]*\)/gi,
-    
-    // Pattern 3: Parameter - Value Unit
-    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]*-[\s]*(\d+\.?\d*)[\s]+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)/gi,
-    
-    // Pattern 4: Parameter Value Unit (simple format)
-    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]+(\d+\.?\d*)[\s]+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)[\s]*$/gi,
-    
-    // Pattern 5: Common lab format with tabs or multiple spaces
-    /([a-zA-Z][a-zA-Z\s]+?)\s{2,}(\d+\.?\d*)\s+(mg\/dl|mmol\/l|g\/dl|%|u\/l|iu\/l|miu\/l|ng\/dl|ug\/dl|pg\/ml|\/ul|million\/ul|cells\/ul)/gi,
-    
-    // Pattern 6: Parameter followed by value (no unit specified - will use default from definitions)
-    /^[\s]*([a-zA-Z][a-zA-Z\s]+?)[\s]*:[\s]*(\d+\.?\d*)[\s]*(?:Normal|High|Low|Abnormal)?[\s]*$/gi
+    // More flexible pattern
+    /(thyroid stimulating hormone|free t3|free t4|fasting blood sugar|hba1c|total cholesterol|hdl cholesterol|ldl cholesterol|triglycerides|blood pressure)\s+(\d+\.?\d*(?:\/\d+)?)\s+(iu\/ml|pg\/ml|ng\/dl|mg\/dl|%|mmhg)/gi
   ];
 
-  // Process each line
-  lines.forEach((line, lineIndex) => {
-    // Skip empty lines or lines that are too short
-    if (!line.trim() || line.trim().length < 3) return;
-    
-    // Skip header lines (common patterns to ignore)
-    const skipPatterns = [
-      /^[\s]*test[\s]*result[\s]*reference/i,
-      /^[\s]*parameter[\s]*value[\s]*range/i,
-      /^[\s]*investigation[\s]*result/i,
-      /^[\s]*normal[\s]*range/i,
-      /^[\s]*reference[\s]*range/i,
-      /^[\s]*-+[\s]*$/,
-      /^[\s]*={2,}[\s]*$/,
-      /^[\s]*page[\s]*\d+/i,
-      /^[\s]*report[\s]*date/i,
-      /^[\s]*patient[\s]*name/i
-    ];
-    
-    const shouldSkip = skipPatterns.some(pattern => pattern.test(line));
-    if (shouldSkip) {
-      console.log(`Skipping header line: ${line.trim()}`);
-      return;
+  // Process the entire text as one line since your PDF extracts as one line
+  const fullText = text.replace(/\s+/g, ' ').trim();
+  
+  // Direct extraction based on known parameters
+  const parameterMappings = [
+    { 
+      pattern: /thyroid stimulating hormone[^0-9]*(\d+\.?\d*)[^a-z]*iu\/ml/gi,
+      name: "tsh", 
+      unit: "iu/ml", 
+      category: "thyroid",
+      referenceRange: { min: 0.4, max: 4.0, text: "0.4 - 4.0" }
+    },
+    { 
+      pattern: /free t3[^0-9]*(\d+\.?\d*)[^a-z]*pg\/ml/gi,
+      name: "free t3", 
+      unit: "pg/ml", 
+      category: "thyroid",
+      referenceRange: { min: 2.3, max: 4.2, text: "2.3 - 4.2" }
+    },
+    { 
+      pattern: /free t4[^0-9]*(\d+\.?\d*)[^a-z]*ng\/dl/gi,
+      name: "free t4", 
+      unit: "ng/dl", 
+      category: "thyroid",
+      referenceRange: { min: 0.8, max: 1.8, text: "0.8 - 1.8" }
+    },
+    { 
+      pattern: /fasting blood sugar[^0-9]*(\d+\.?\d*)[^a-z]*mg\/dl/gi,
+      name: "glucose", 
+      unit: "mg/dl", 
+      category: "diabetes",
+      referenceRange: { min: 70, max: 100, text: "70 - 100" }
+    },
+    { 
+      pattern: /hba1c[^0-9]*(\d+\.?\d*)[^a-z]*%?/gi,
+      name: "hba1c", 
+      unit: "%", 
+      category: "diabetes",
+      referenceRange: { min: 4.0, max: 5.6, text: "< 5.7" }
+    },
+    { 
+      pattern: /total cholesterol[^0-9]*(\d+\.?\d*)[^a-z]*mg\/dl/gi,
+      name: "total cholesterol", 
+      unit: "mg/dl", 
+      category: "lipid",
+      referenceRange: { min: 0, max: 200, text: "< 200" }
+    },
+    { 
+      pattern: /hdl cholesterol[^0-9]*(\d+\.?\d*)[^a-z]*mg\/dl/gi,
+      name: "hdl cholesterol", 
+      unit: "mg/dl", 
+      category: "lipid",
+      referenceRange: { min: 40, max: 200, text: "> 40" }
+    },
+    { 
+      pattern: /ldl cholesterol[^0-9]*(\d+\.?\d*)[^a-z]*mg\/dl/gi,
+      name: "ldl cholesterol", 
+      unit: "mg/dl", 
+      category: "lipid",
+      referenceRange: { min: 0, max: 130, text: "< 130" }
+    },
+    { 
+      pattern: /triglycerides[^0-9]*(\d+\.?\d*)[^a-z]*mg\/dl/gi,
+      name: "triglycerides", 
+      unit: "mg/dl", 
+      category: "lipid",
+      referenceRange: { min: 0, max: 150, text: "< 150" }
     }
+  ];
 
-    let matchFound = false;
-    
-    // Try patterns in order of specificity
-    for (let patternIndex = 0; patternIndex < patterns.length; patternIndex++) {
-      const pattern = patterns[patternIndex];
-      pattern.lastIndex = 0; // Reset regex
+  parameterMappings.forEach(mapping => {
+    const match = mapping.pattern.exec(fullText);
+    if (match) {
+      const value = parseFloat(match[1]);
       
-      const match = pattern.exec(line);
-      if (match && !matchFound) {
-        const name = match[1].trim().toLowerCase();
-        const value = parseFloat(match[2]);
-        const unit = match[3] ? match[3].toLowerCase() : '';
+      if (!isNaN(value) && value > 0) {
+        const parameter = {
+          name: mapping.name,
+          value: value,
+          unit: mapping.unit,
+          referenceRange: mapping.referenceRange,
+          status: determineParameterStatus(value, mapping.referenceRange),
+          category: mapping.category,
+          reportId: reportId,
+          userId: userId,
+          extractedFrom: match[0]
+        };
         
-        // Additional validation
-        if (name.length < 2 || name.length > 50) {
-          console.log(`Skipping invalid parameter name: "${name}"`);
-          continue;
-        }
-        
-        // Check for valid numeric value
-        if (isNaN(value) || value < 0 || value > 100000) {
-          console.log(`Skipping invalid value: ${value} for parameter: ${name}`);
-          continue;
-        }
-        
-        console.log(`Pattern ${patternIndex + 1} matched: "${name}" = ${value} ${unit} (Line: ${lineIndex + 1})`);
-        
-        // Check if this parameter is in our definitions
-        const paramDef = findParameterDefinition(name);
-        if (paramDef) {
-          // Check for duplicates
-          const isDuplicate = parameters.some(p => 
-            p.name === name && Math.abs(p.value - value) < 0.01
-          );
-          
-          if (!isDuplicate) {
-            const parameter = {
-              name: name,
-              value: value,
-              unit: unit || paramDef.unit,
-              referenceRange: {
-                min: paramDef.min,
-                max: paramDef.max
-              },
-              status: determineStatus(value, paramDef),
-              category: paramDef.category,
-              reportId: reportId,
-              userId: userId,
-              extractedFrom: line.trim()
-            };
-            
-            parameters.push(parameter);
-            console.log(`✓ Added parameter: ${name} = ${value} ${parameter.unit} (${parameter.status})`);
-            matchFound = true;
-            break; // Stop trying other patterns for this line
-          } else {
-            console.log(`Duplicate parameter found, skipping: ${name}`);
-          }
-        } else {
-          console.log(`Parameter not recognized: "${name}"`);
-        }
+        parameters.push(parameter);
+        console.log(`✓ Extracted: ${mapping.name} = ${value} ${mapping.unit}`);
       }
     }
     
-    if (!matchFound && line.trim().length > 5) {
-      console.log(`No pattern matched for line: "${line.trim()}"`);
-    }
-  });
-
-  // Sort parameters by category and name for consistent ordering
-  parameters.sort((a, b) => {
-    if (a.category !== b.category) {
-      return a.category.localeCompare(b.category);
-    }
-    return a.name.localeCompare(b.name);
+    // Reset regex lastIndex
+    mapping.pattern.lastIndex = 0;
   });
 
   console.log(`Total parameters extracted: ${parameters.length}`);
-  if (parameters.length > 0) {
-    console.log("Extracted parameters:", parameters.map(p => `${p.name}: ${p.value} ${p.unit}`));
+  return parameters;
+};
+
+const determineParameterStatus = (value, referenceRange) => {
+  if (!referenceRange || typeof value !== 'number') return 'normal';
+  
+  const { min, max, text } = referenceRange;
+  
+  if (text && text.includes('<')) {
+    const limit = parseFloat(text.match(/[\d.]+/)?.[0]);
+    return value <= limit ? 'normal' : 'high';
   }
   
-  return parameters;
+  if (text && text.includes('>')) {
+    const limit = parseFloat(text.match(/[\d.]+/)?.[0]);
+    return value >= limit ? 'normal' : 'low';
+  }
+  
+  if (min !== undefined && max !== undefined) {
+    if (value < min) return 'low';
+    if (value > max) return 'high';
+    return 'normal';
+  }
+  
+  return 'normal';
 };
 
 // Enhanced parameter definition finder with better matching
