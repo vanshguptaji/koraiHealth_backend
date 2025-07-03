@@ -92,35 +92,22 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     // Only parse health parameters if we actually extracted text successfully
     if (isTextExtracted && extractedText && extractedText.trim().length > 20) {
       try {
-        console.log("Attempting to parse health parameters...");
-        console.log("Using labReport._id:", labReport._id);
-        console.log("Using user._id:", req.user._id);
+        console.log("Attempting enhanced health parameter parsing...");
         console.log("Full extracted text for parsing:", extractedText);
         
-        // Try parseHealthParameters first (with fixes)
+        // Use enhanced parsing
         let parsedParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
-        console.log("Auto-parsed parameters:", parsedParameters);
+        console.log("Enhanced parsed parameters:", parsedParameters);
         
-        // If parseHealthParameters returns empty, try manual parsing
+        // Fallback to manual parsing if needed
         if (!parsedParameters || !Array.isArray(parsedParameters) || parsedParameters.length === 0) {
-          console.log("Auto-parsing failed, attempting manual parsing...");
+          console.log("Enhanced parsing failed, trying manual parsing...");
           parsedParameters = manualParseHealthParameters(extractedText, labReport._id, req.user._id);
           console.log("Manual parsed parameters:", parsedParameters);
         }
         
         if (parsedParameters && Array.isArray(parsedParameters) && parsedParameters.length > 0) {
-          // Clean the parameters (remove validateHealthParameters as it might be filtering too much)
-          healthParameters = parsedParameters.map(param => ({
-            name: param.name,
-            value: param.value,
-            unit: param.unit,
-            referenceRange: param.referenceRange,
-            status: param.status || 'normal',
-            category: param.category || 'other',
-            reportId: labReport._id,
-            userId: req.user._id,
-            extractedFrom: param.extractedFrom || 'Extracted from lab report'
-          }));
+          healthParameters = parsedParameters;
           
           console.log("Final parameters for saving:", healthParameters);
           
@@ -131,20 +118,11 @@ const uploadLabReport = asyncHandler(async (req, res) => {
               const savedParameters = await HealthParameter.insertMany(healthParameters);
               console.log(`Successfully saved ${savedParameters.length} health parameters`);
               
-              // Verify they were saved
-              const verifyCount = await HealthParameter.countDocuments({ 
-                reportId: labReport._id,
-                userId: req.user._id 
-              });
-              console.log(`Verification: ${verifyCount} parameters found in database`);
-              
               // Generate AI recommendations
-              console.log("Generating AI recommendations...");
               recommendations = await generateAIRecommendations(healthParameters, extractedText);
               
             } catch (saveError) {
               console.error("Error saving parameters:", saveError);
-              console.error("Parameters that failed to save:", healthParameters);
             }
           }
         } else {
@@ -152,8 +130,6 @@ const uploadLabReport = asyncHandler(async (req, res) => {
         }
       } catch (error) {
         console.error("Health parameter parsing failed:", error);
-        console.error("Error details:", error.message);
-        console.error("Error stack:", error.stack);
       }
     } else {
       console.log("Skipping parameter parsing - insufficient text content");
