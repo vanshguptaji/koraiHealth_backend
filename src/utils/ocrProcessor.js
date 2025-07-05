@@ -6,17 +6,11 @@ const require = createRequire(import.meta.url);
 // Enhanced main extraction function with multiple fallback methods
 export const extractTextFromFileSimple = async (filePath, mimeType) => {
   try {
-    console.log(`Starting enhanced text extraction for file type: ${mimeType}`);
-    console.log(`File path: ${filePath}`);
-    
-    // Verify file exists
     if (!fs.existsSync(filePath)) {
       throw new Error(`File not found: ${filePath}`);
     }
 
-    // Get file stats
     const stats = fs.statSync(filePath);
-    console.log(`File size: ${stats.size} bytes`);
 
     if (mimeType === 'application/pdf') {
       return await extractTextFromPDFEnhanced(filePath);

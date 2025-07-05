@@ -17,12 +17,7 @@ import {
 
 const uploadLabReport = asyncHandler(async (req, res) => {
   try {
-    console.log("Upload request received");
-    console.log("Files:", req.files);
-    console.log("File:", req.file);
-    console.log("User:", req.user);
 
-    // Handle both req.file and req.files
     const uploadedFile = req.file || (req.files && req.files[0]);
 
     if (!uploadedFile) {
@@ -32,47 +27,33 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     const fileLocalPath = uploadedFile.path;
     console.log("File local path:", fileLocalPath);
     
-    // Check if file exists before processing
     const fs = await import('fs');
     if (!fs.default.existsSync(fileLocalPath)) {
-      console.error("File not found at path:", fileLocalPath);
       throw new ApiError(400, "Uploaded file not found");
     }
     
-    // Upload to cloudinary
-    console.log("Uploading to Cloudinary...");
     const uploadResult = await uploadOnCloudinary(fileLocalPath);
     
     if (!uploadResult) {
       throw new ApiError(400, "Error while uploading file to cloudinary");
     }
 
-    console.log("Cloudinary upload successful:", uploadResult.secure_url);
-
-    // Extract text from file
-    console.log("Starting text extraction...");
     let extractedText = "";
     let isTextExtracted = false;
     let healthContent = null;
     
     try {
       extractedText = await extractTextFromFile(fileLocalPath, uploadedFile.mimetype);
-      console.log("Text extraction completed. Length:", extractedText.length);
-      console.log("Extracted text sample:", extractedText.substring(0, 500));
       
       if (extractedText && extractedText.trim().length > 10) {
         isTextExtracted = true;
         healthContent = detectHealthContent(extractedText);
-        console.log("Health content detected:", healthContent);
       }
     } catch (textError) {
-      console.error("Text extraction failed:", textError);
       extractedText = `Text extraction failed: ${textError.message}`;
       isTextExtracted = false;
     }
 
-    // Create lab report FIRST
-    console.log("Creating lab report in database...");
     const labReport = await LabReport.create({
       fileName: uploadResult.public_id,
       originalName: uploadedFile.originalname,
@@ -84,41 +65,26 @@ const uploadLabReport = asyncHandler(async (req, res) => {
       rawText: extractedText,
     });
 
-    console.log("Lab report created with ID:", labReport._id);
-
     let healthParameters = [];
     let recommendations = null;
 
-    // Only parse health parameters if we actually extracted text successfully
     if (isTextExtracted && extractedText && extractedText.trim().length > 20) {
       try {
-        console.log("Attempting enhanced health parameter parsing...");
-        console.log("Full extracted text for parsing:", extractedText);
-        
-        // Use enhanced parsing
+
         let parsedParameters = parseHealthParameters(extractedText, labReport._id, req.user._id);
-        console.log("Enhanced parsed parameters:", parsedParameters);
         
-        // Fallback to manual parsing if needed
         if (!parsedParameters || !Array.isArray(parsedParameters) || parsedParameters.length === 0) {
-          console.log("Enhanced parsing failed, trying manual parsing...");
           parsedParameters = manualParseHealthParameters(extractedText, labReport._id, req.user._id);
-          console.log("Manual parsed parameters:", parsedParameters);
         }
         
         if (parsedParameters && Array.isArray(parsedParameters) && parsedParameters.length > 0) {
           healthParameters = parsedParameters;
           
-          console.log("Final parameters for saving:", healthParameters);
-          
-          // Save health parameters to database
           if (healthParameters.length > 0) {
-            console.log("Saving health parameters to database...");
             try {
               const savedParameters = await HealthParameter.insertMany(healthParameters);
               console.log(`Successfully saved ${savedParameters.length} health parameters`);
-              
-              // Generate AI recommendations
+
               recommendations = await generateAIRecommendations(healthParameters, extractedText);
               
             } catch (saveError) {
@@ -136,18 +102,14 @@ const uploadLabReport = asyncHandler(async (req, res) => {
       console.log("isTextExtracted:", isTextExtracted);
       console.log("extractedText length:", extractedText ? extractedText.length : 0);
     }
-
-    // Clean up temporary file
     try {
       if (fs.default.existsSync(fileLocalPath)) {
         fs.default.unlinkSync(fileLocalPath);
-        console.log("Temporary file cleaned up");
       }
     } catch (cleanupError) {
       console.error("Error cleaning up temporary file:", cleanupError);
     }
 
-    console.log("Sending response...");
     res.status(201).json(
       new ApiResponse(201, {
         labReport,
@@ -159,9 +121,6 @@ const uploadLabReport = asyncHandler(async (req, res) => {
     );
 
   } catch (error) {
-    console.error("Upload lab report error:", error);
-    
-    // Clean up temporary file if it exists
     const uploadedFile = req.file || (req.files && req.files[0]);
     if (uploadedFile && uploadedFile.path) {
       try {
@@ -178,12 +137,11 @@ const uploadLabReport = asyncHandler(async (req, res) => {
   }
 });
 
-// Manual parsing function as fallback
+
 const manualParseHealthParameters = (text, reportId, userId) => {
   console.log("Starting manual parsing...");
   const parameters = [];
   
-  // Extract specific parameters from your sample data
   const testMappings = [
     { name: "tsh", searchTerms: ["thyroid stimulating hormone", "tsh"], value: "3.5", unit: "iu/ml", normalRange: "0.4 - 4.0", category: "thyroid" },
     { name: "free t3", searchTerms: ["free t3", "t3"], value: "3.2", unit: "pg/ml", normalRange: "2.3 - 4.2", category: "thyroid" },
@@ -193,21 +151,20 @@ const manualParseHealthParameters = (text, reportId, userId) => {
     { name: "total cholesterol", searchTerms: ["total cholesterol", "cholesterol"], value: "190", unit: "mg/dl", normalRange: "< 200", category: "lipid" },
     { name: "hdl cholesterol", searchTerms: ["hdl cholesterol", "hdl"], value: "50", unit: "mg/dl", normalRange: "> 40", category: "lipid" },
     { name: "ldl cholesterol", searchTerms: ["ldl cholesterol", "ldl"], value: "110", unit: "mg/dl", normalRange: "< 130", category: "lipid" },
-    { name: "triglycerides", searchTerms: ["triglycerides"], value: "150", unit: "mg/dl", normalRange: "< 150", category: "lipid" }
+    { name: "triglycerides", searchTerms: ["triglycerides"], value: "150", unit: "mg/dl", normalRange: "< 150", category: "lipid" },
+    {name: "haemoglobin", searchTerms: ["hemoglobin", "hb"], value: "", unit: "g/dl", normalRange: "13.5 - 17.5", category: "blood" },
   ];
   
   const textLower = text.toLowerCase();
   
-  // Check if any of these parameters exist in the text
   testMappings.forEach(test => {
     const found = test.searchTerms.some(term => textLower.includes(term.toLowerCase()));
     
     if (found) {
       const numericValue = parseFloat(test.value);
       
-      // Use the correct field names that match HealthParameter schema
       parameters.push({
-        name: test.name,  // NOT parameterName
+        name: test.name,  
         value: numericValue,
         unit: test.unit,
         referenceRange: {
@@ -217,18 +174,13 @@ const manualParseHealthParameters = (text, reportId, userId) => {
         category: test.category,
         reportId: reportId,
         userId: userId,
-        extractedFrom: `Manual extraction: ${test.name}`  // Required field
+        extractedFrom: `Manual extraction: ${test.name}`  
       });
-      
-      console.log(`Found parameter: ${test.name} = ${test.value} ${test.unit}`);
     }
   });
   
-  console.log(`Manual parsing found ${parameters.length} parameters`);
-  return parameters;
 };
 
-// Helper function to determine status
 const determineStatus = (value, normalRange) => {
   if (!normalRange || !value) return 'Unknown';
   
@@ -251,7 +203,6 @@ const determineStatus = (value, normalRange) => {
   return 'Unknown';
 };
 
-// Get user's lab reports
 const getUserLabReports = asyncHandler(async (req, res) => {
   const reports = await LabReport.find({ uploadedBy: req.user._id })
     .sort({ createdAt: -1 });
@@ -261,7 +212,6 @@ const getUserLabReports = asyncHandler(async (req, res) => {
   );
 });
 
-// Get file text
 const getFileText = asyncHandler(async (req, res) => {
   const { reportId } = req.params;
   
@@ -282,7 +232,6 @@ const getFileText = asyncHandler(async (req, res) => {
   );
 });
 
-// Retry text extraction
 const retryTextExtraction = asyncHandler(async (req, res) => {
   const { reportId } = req.params;
   
@@ -295,14 +244,11 @@ const retryTextExtraction = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Lab report not found");
   }
   
-  // This would require re-downloading from Cloudinary and processing
-  // For now, return the existing data
   res.status(200).json(
     new ApiResponse(200, report, "Retry functionality not implemented yet")
   );
 });
 
-// Get all file types
 const getAllFileTypes = asyncHandler(async (req, res) => {
   const fileTypes = await LabReport.aggregate([
     { $match: { uploadedBy: req.user._id } },
@@ -315,7 +261,6 @@ const getAllFileTypes = asyncHandler(async (req, res) => {
   );
 });
 
-// Delete lab report
 const deleteLabReport = asyncHandler(async (req, res) => {
   const { reportId } = req.params;
   
@@ -328,10 +273,8 @@ const deleteLabReport = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Lab report not found");
   }
   
-  // Delete associated health parameters
   await HealthParameter.deleteMany({ reportId: reportId, userId: req.user._id });
   
-  // Delete the report
   await LabReport.findByIdAndDelete(reportId);
   
   res.status(200).json(
@@ -339,14 +282,10 @@ const deleteLabReport = asyncHandler(async (req, res) => {
   );
 });
 
-// Get health parameters for a report
 const getHealthParameters = asyncHandler(async (req, res) => {
   try {
     const { reportId } = req.params;
-    console.log("Getting health parameters for reportId:", reportId);
-    console.log("User ID:", req.user._id);
-    
-    // First check if the report exists and belongs to user
+
     const labReport = await LabReport.findOne({ 
       _id: reportId, 
       uploadedBy: req.user._id 
@@ -357,16 +296,10 @@ const getHealthParameters = asyncHandler(async (req, res) => {
       throw new ApiError(404, "Lab report not found");
     }
     
-    console.log("Lab report found:", labReport._id);
-    
-    // Get parameters with detailed logging
     const parameters = await HealthParameter.find({ 
       reportId: reportId,
       userId: req.user._id 
     }).sort({ createdAt: -1 });
-    
-    console.log("Found parameters count:", parameters.length);
-    console.log("Parameters:", parameters);
     
     res.status(200).json(
       new ApiResponse(200, {
@@ -381,7 +314,6 @@ const getHealthParameters = asyncHandler(async (req, res) => {
   }
 });
 
-// Get user health trends
 const getUserHealthTrends = asyncHandler(async (req, res) => {
   try {
     const { days = 30 } = req.query;
@@ -395,12 +327,9 @@ const getUserHealthTrends = asyncHandler(async (req, res) => {
       createdAt: { $gte: startDate }
     }).sort({ createdAt: -1 });
     
-    console.log("Parameters in date range:", parameters.length);
-    
-    // Group by parameter type for trends - use 'name' not 'parameterName'
     const trendData = {};
     parameters.forEach(param => {
-      if (!trendData[param.name]) {  // Changed from param.parameterName
+      if (!trendData[param.name]) {  
         trendData[param.name] = [];
       }
       trendData[param.name].push({
@@ -411,8 +340,6 @@ const getUserHealthTrends = asyncHandler(async (req, res) => {
         status: param.status
       });
     });
-    
-    console.log("Trend data keys:", Object.keys(trendData));
     
     res.status(200).json(
       new ApiResponse(200, {
@@ -428,10 +355,8 @@ const getUserHealthTrends = asyncHandler(async (req, res) => {
   }
 });
 
-// Get health dashboard
 const getHealthDashboard = asyncHandler(async (req, res) => {
   try {
-    console.log("Getting dashboard for user:", req.user._id);
     
     const recentReports = await LabReport.find({ uploadedBy: req.user._id })
       .sort({ createdAt: -1 })
@@ -444,7 +369,6 @@ const getHealthDashboard = asyncHandler(async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(10);
     
-    // Get parameter types summary
     const parameterTypes = await HealthParameter.aggregate([
       { $match: { userId: req.user._id } },
       { $group: { 
